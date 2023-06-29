@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<launch>
+
+									
+					<!-- Nodes -->
+	<node pkg="pure_pursuit" type="navigation_handler" name="navigation_handler" output="screen" />
+	
+	
+	
+	<node pkg="pure_pursuit" type="path_pub" name="path_pub"  />
+	<node pkg="pure_pursuit" type="plotter.py" name="plotter"   />
+	<node pkg="pure_pursuit" type="pure_pursuit_controller" name="pure_pursuit_controller" output="screen" />
+	<node pkg="pure_pursuit" type="model2" name="model2" output="screen"  />
+	
+	
+	<param name="publish_frequency" type="double" value="10.0" />
+	<rosparam command="load" file="$(find pure_pursuit)/parameters.yaml" />
+	 
+<rosparam>
+  a: 1
+  b: 2
+</rosparam>
+	
+	
+	
+	
+
+	
+	
+	
+
+</launch>
+
+
+

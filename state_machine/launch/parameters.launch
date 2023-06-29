@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<launch>
+    <param name="/max_rpm" value="4000.0"/>
+    <param name="/wheel_radius" value="0.253"/>
+    <param name="/engine_threshhold" value="-5.0"/>
+    <param name="/max_dec" value="10.0"/>
+    <param name="/max_brake" value="100.0"/>
+    <param name="/max_torque" value="195.0"/>
+    <param name="/max_steer_angle" value="24.0"/> <!-- in degrees -->
+    <param name="/wheel_base" value="1.5"/>
+    <param name="/total_mass" value="100.0"/>
+    <param name="/friction_constant" value="0.5"/>
+    <param name="/cmd_timeout" value="0.5"/>
+</launch>
