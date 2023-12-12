@@ -1,9 +1,27 @@
-"""
-Install the lidar library
-"""
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+from setuptools import find_packages, setup
 
-d = generate_distutils_setup(packages=["state_machine"], package_dir={"": "src/state_machine"})
+package_name = 'state_machine'
 
-setup(**d)
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='amin',
+    maintainer_email='amin@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'state_machine = state_machine.ros_can:main',
+            'interface = state_machine.interface:main',
+        ],
+    },
+)

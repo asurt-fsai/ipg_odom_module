@@ -2,6 +2,5 @@
 <launch>
 <node name="state_machine" pkg="state_machine" type="ros_can.py" output="screen"></node>
 <node name="interface" pkg="state_machine" type="interface.py" output="screen"></node>
-<node pkg="state_machine_bridge" type="IPG_Bridge" name="ipg_bridge" output="screen" />
 <include file="$(find state_machine)/launch/parameters.launch" />
 </launch>

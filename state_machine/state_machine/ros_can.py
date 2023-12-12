@@ -8,26 +8,23 @@ from eufs_msgs.msg import (
 )
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from sensor_msgs.msg import Imu, NavSatFix
-import rospy
 import time
 from enum import Enum
 import math
-"""
-TODO:
-    - Test Bridge with IPG
-"""
+import rclpy
+from rclpy.node import Node
 
-MAX_RPM = rospy.get_param("/max_rpm",4000)
-WHEEL_RADIUS = rospy.get_param("/wheel_radius",0.3)
-ENGINE_THRESHHOLD = rospy.get_param("/engine_threshhold",-10)
-MAX_DEC = rospy.get_param("/max_dec", -5)
-MAX_BRAKE = rospy.get_param("/max_brake", 0.5)
-MAX_TORQUE = rospy.get_param("/max_torque", 1000)
-MAX_STEER_ANGLE_DEG = rospy.get_param("/max_steer_angle", 30)   
-WHEELBASE = rospy.get_param("/wheel_base", 1.5)
-CMD_TIMEOUT = rospy.get_param("/cmd_timeout", 0.5)
-FRICTION_CONSTANT = rospy.get_param("/friction_constant", 0.5)
-TOTAL_MASS = rospy.get_param("/total_mass", 300)
+MAX_RPM = 4000
+WHEEL_RADIUS = 0.3
+ENGINE_THRESHHOLD = -10
+MAX_DEC =  -5
+MAX_BRAKE = 0.5
+MAX_TORQUE =  1000
+MAX_STEER_ANGLE_DEG = 30   
+WHEELBASE =  1.5
+CMD_TIMEOUT =  0.5
+FRICTION_CONSTANT =  0.5
+TOTAL_MASS =  300
 
 class ASStateE(Enum):
     AS_OFF = 1
@@ -66,8 +63,9 @@ class AMIStateE(Enum):
     AMI_AUTONOMOUS_DEMO = 7
 
 
-class StateMachine:
-    def __init__(self) -> None:
+class StateMachine(Node):
+    def __init__(self):
+        super().__init__("state_machine")
         self.asState = ASStateE.AS_OFF
         self.asMasterSwitch: bool = False
         self.tsMasterSwitch: bool = False
@@ -93,22 +91,33 @@ class StateMachine:
         self.timeLastCmd = time.time()
 
         # Publishers
-        self.statePub = rospy.Publisher("/state_machine/state", CanState, queue_size=10)
-        self.stateStrPub = rospy.Publisher(
-            "/state_machine/state_str", String, queue_size=10
-        )
-        self.wheelPub = rospy.Publisher(
-            "/state_machine/wheel_speeds", WheelSpeedsStamped, queue_size=10
-        )
-        self.cmdPub = rospy.Publisher(
-            "/state_machine/vehicle_commands", VehicleCommandsStamped, queue_size=10
-        )
-        self.twistPub = rospy.Publisher(
-            "/state_machine/twist", TwistWithCovarianceStamped, queue_size=10
-        )
-        self.imuPub = rospy.Publisher("state_machine/imu", Imu, queue_size=10)
-        self.gpsPub = rospy.Publisher("state_machine/fix", NavSatFix, queue_size=10)
+        self.statePub = self.create_publisher(CanState,"/state_machine/state",10)
+        self.stateStrPub = self.create_publisher(String,"/state_machine/state_str",10)
+        self.wheelPub = self.create_publisher(WheelSpeedsStamped,"/state_machine/wheel_speeds",10)
+        self.cmdPub = self.create_publisher(VehicleCommandsStamped,"/state_machine/cmd_pub",10)
+        self.twistPub = self.create_publisher(TwistWithCovarianceStamped,"/state_machine/twist",10)
+        self.imuPub = self.create_publisher(Imu,"/state_machine/imu",10)
+        self.gpsPub = self.create_publisher(NavSatFix,"/state_machine/gps",10)
 
+        # Subscribers
+        self.goSignalSub = self.create_subscription(Bool, "/state_machine/go_signal", self.goSignalCB, 10)
+        self.asMasterSub = self.create_subscription(
+            Bool,"state_machine/as_master_switch",  self.asMasterSwitchCB,10
+        )
+        self.tsMasterSub = self.create_subscription(
+             Bool,"state_machine/ts_master_switch", self.tsMasterSwitchCB,10
+        )
+        self.missionSelectSub = self.create_subscription(
+             MissionSelect,"state_machine/mission_select", self.missionSelectCB,10
+        )
+        self.wheelSpeedSub = self.create_subscription(
+            WheelSpeedsStamped,"carmaker/wheel_speeds",  self.wheelSpeedCB,10
+        )
+        self.ebsSub = self.create_subscription(Bool,"state_machine/ebs",  self.ebsStateCB, 10)
+        self.ebsFailSub = self.create_subscription( Bool,"state_machine/ebs_fail", self.ebsFailCB, 10)
+        self.flagSub = self.create_subscription( Bool,"state_machine/flag", self.flagCB, 10)
+        self.drivingFlagSub = self.create_subscription( Bool,"state_machine/driving_flag", self.drivingFlagCB, 10)
+        self.cmdSub = self.create_subscription( AckermannDriveStamped,"state_machine/cmd", self.cmdCB, 10)
     def wheelSpeedCB(self, wheelSpeed: WheelSpeedsStamped):
         # wheel speeds in rpm
         self.wheelspeed[0] = wheelSpeed.speeds.lf_speed
@@ -119,7 +128,7 @@ class StateMachine:
 
     def wheelMsg(self):
         msg = WheelSpeedsStamped()
-        msg.header.stamp = rospy.Time.now()
+        msg.header.stamp = self.get_clock().now().to_msg()
         msg.speeds.lf_speed = self.wheelspeed[0]
         msg.speeds.rf_speed = self.wheelspeed[1]
         msg.speeds.lb_speed = self.wheelspeed[2]
@@ -170,20 +179,20 @@ class StateMachine:
                 self.frAxleTrqReq = self.rrAxleTrqReq = (TOTAL_MASS * WHEEL_RADIUS * abs(acceleration + FRICTION_CONSTANT))/ 2.0
                 self.rpmReq = MAX_RPM
             elif acceleration == 0.0:
-                self.frAxleTrqReq = self.rrAxleTrqReq = 0
+                self.frAxleTrqReq = self.rrAxleTrqReq = 0.0
                 self.rpmReq = (velocity / WHEEL_RADIUS)*(60/(2*math.pi))
                 self.brake = 0.0
             elif acceleration > ENGINE_THRESHHOLD:
                 self.brake = 0.0
                 self.rpmReq = 0.0
             else:
-                self.frAxleTrqReq = self.rrAxleTrqReq = 0
-                self.brake = (-acceleration / MAX_DEC) * MAX_BRAKE
+                self.frAxleTrqReq = self.rrAxleTrqReq = 0.0
+                self.brake = float((-acceleration / MAX_DEC) * MAX_BRAKE)
         else:
-            self.frAxleTrqReq = self.rrAxleTrqReq = 0
-            self.rpmReq = 0
-            self.steerAngleReq = 0
-            self.brake = 0
+            self.frAxleTrqReq = self.rrAxleTrqReq = 0.0
+            self.rpmReq = 0.0
+            self.steerAngleReq = 0.0
+            self.brake = 0.0
 
     def getMissionStatus(self):
         if self.asState is ASStateE.AS_OFF:
@@ -214,7 +223,7 @@ class StateMachine:
 
     def cmdMsg(self):
         cmd = VehicleCommandsStamped()
-        cmd.header.stamp = rospy.Time.now()
+        cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.header.frame_id = "base_link"  
         cmd.commands.handshake = 1 #????????????????????????????????????????????????????????????
         cmd.commands.ebs = self.ebsState.value
@@ -296,7 +305,7 @@ class StateMachine:
 
     def twistMsg(self):
         msg = TwistWithCovarianceStamped()
-        msg.header.stamp = rospy.Time.now()
+        msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "base_link"
         avgWheelSpeed = (self.wheelspeed[2] + self.wheelspeed[3]) / 2
         msg.twist.twist.linear.x = avgWheelSpeed * math.pi * WHEEL_RADIUS / 30
@@ -422,16 +431,17 @@ class StateMachine:
         self.ebsState = EBSStateE.EBS_ARMED
         self.drivingFlag = False
         self.missionComplete = False
-        self.steerAngleReq = 0
-        self.frAxleTrqReq = self.rrAxleTrqReq = 0
-        self.rpmReq = 0
-        self.brake = 0
+        self.steerAngleReq = 0.0
+        self.frAxleTrqReq = self.rrAxleTrqReq = 0.0
+        self.rpmReq = 0.0
+        self.brake = 0.0
 
     def run(self):
         self.getMissionStatus()
         self.directionRequestState()
         self.getState()
         self.checkCMDTimeout()
+        self.publish()
         if self.asState == ASStateE.AS_OFF:
             self.reset()
 
@@ -453,29 +463,13 @@ class StateMachine:
 
         
 
-if __name__ == "__main__":
+def main(args=None):
+    rclpy.init()
     stateMachine = StateMachine()
-    rospy.init_node("state_machine")
-    rospy.Subscriber("/state_machine/go_signal", Bool, stateMachine.goSignalCB)
-    rospy.Subscriber(
-        "state_machine/as_master_switch", Bool, stateMachine.asMasterSwitchCB
-    )
-    rospy.Subscriber(
-        "state_machine/ts_master_switch", Bool, stateMachine.tsMasterSwitchCB
-    )
-    rospy.Subscriber(
-        "state_machine/mission_select", MissionSelect, stateMachine.missionSelectCB
-    )
-    rospy.Subscriber(
-        "carmaker/wheel_speeds", WheelSpeedsStamped, stateMachine.wheelSpeedCB
-    )
-    rospy.Subscriber("state_machine/ebs", Bool, stateMachine.ebsStateCB)
-    rospy.Subscriber("state_machine/ebs_fail", Bool, stateMachine.ebsFailCB)
-    rospy.Subscriber("state_machine/flag", Bool, stateMachine.flagCB)
-    rospy.Subscriber("state_machine/driving_flag", Bool, stateMachine.drivingFlagCB)
-    rospy.Subscriber("state_machine/cmd", AckermannDriveStamped, stateMachine.cmdCB)
-
-    while not rospy.is_shutdown():
+    while rclpy.ok():
         stateMachine.run()
-        stateMachine.publish()
-        rospy.sleep(0.1)
+        rclpy.spin_once(stateMachine)
+    stateMachine.destroy_node()
+
+if __name__ == "__main__":
+    main()
